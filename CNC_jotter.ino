@@ -1,5 +1,6 @@
 
 #include <Servo.h>
+#include <Stepper.h>
 Servo pen_control;
 #define pen_pos 0
 #define Xstep_mtr 1
@@ -9,8 +10,13 @@ Servo pen_control;
 #define step_fwd 1
 #define step_rev 0
 
-#define step_delay 50
-#define pulse_delay 40
+#define LineDelay 50
+#define penDelay 50
+
+#define step_delay 300
+#define pulse_delay 300
+
+#define LINE_BUFFER_LENGTH 512
 
 #define Ystep_pin 7
 #define Ydir_pin 6
@@ -20,41 +26,69 @@ Servo pen_control;
 #define Ysense_pin 12
 #define servo_pin 5
 
-#define Xstep_max 10000000
+#define Xstep_max 32000
 #define Xstep_min 0
-#define Ystep_max 10000000
+#define Ystep_max 32000
 #define Ystep_min 0
 
-#define Xstep_sync_val 10
-#define Ystep_sync_val 10
+#define  Zmax 1
+#define Zmin 0
+float Xpos = Xstep_min
+float Ypos = Ystep_min
+float Zpos = Zstep_min;
+
+#define Xstep_sync_val 0
+#define Ystep_sync_val 0
 #define Xstep_reset_val 5000
 #define Ystep_reset_val 5000
-#define Xstep_start_val 40000  //change to paper boundaries
-#define Ystep_start_val 40000 //cahnge to paper boundaries
+#define Xstep_start_val 17000  //change to paper boundaries
+#define Ystep_start_val 17000 //cahnge to paper boundaries
+
+float stepsPerMillimeterX = 7;
+float stepsPerMillimeterY = 7;
 
 int Xstep_count = 0;
 int Ystep_count = 0;
 boolean Xdir = step_fwd;
 boolean Ydir = step_fwd;
+boolean verbose = false;
 
-void pen_up_down(byte up_down)
-{
+const int penZUp = 40;
+const int penZDown = 85;
 
-  if (up_down == up)
-  {
-    pen_control.write(270);
-    pen_pos == 270;
+const int stepsPerRevolution = 400;
+
+Stepper Xstepper(stepsPerRevolution, Xstep_pin, Xdir_pin);
+Stepper Ystepper(stepsPerRevolution, Ystep_pin, Ydir_pin);
+
+struct point {
+  float x;
+  float y;
+  float z;
+};
+
+struct point actuatorPos;
+
+void penUp() {
+  pen_control.write(270);
+  delay(LineDelay);
+  Zpos = Zmax;
+  if (verbose) {
+    Serial.println("Pen up!");
   }
-  if (up_down == down)
-  {
-    pen_control.write(45);
-    pen_pos == 45;
+}
+//  Lowers pen
+void penDown() {
+  pen_control.write(45);
+  delay(LineDelay);
+  Zpos = Zmin;
+  if (verbose) {
+    Serial.println("Pen down.");
   }
 }
 
 void step_sync()
 {
-  pen_up_down(up);
   Serial.println("   SYNCING STEPPER MOTORS _ PLEASE WAIT...");
   boolean Ysen_flag, Xsen_flag;
   while (digitalRead(Ysense_pin) | digitalRead(Xsense_pin)) {
@@ -223,24 +257,211 @@ void step_goto(int Xpos, int Ypos)
   Serial.println("          READY.");
 }
 
-void draw()
-{
-  step_goto(Xstep_start_val, Ystep_start_val);
+void drawLine(float x1, float y1) {
 
-  //Draw box
-  pen_up_down(down);
+  if (verbose)
+  {
+    Serial.print("fx1, fy1: ");
+    Serial.print(x1);
+    Serial.print(",");
+    Serial.print(y1);
+    Serial.println("");
+  }  
 
-  step_goto(Xstep_count + 10000, Ystep_count);
-  step_goto(Xstep_count, Ystep_count + 10000);
-  step_goto(Xstep_count - 10000, Ystep_count);
-  step_goto(Xstep_count, Ystep_count - 10000);
+  //  Bring instructions within limits
+  if (x1 >= Xstep_max) { 
+    x1 = Xstep_max; 
+  }
+  if (x1 <= Xstep_min) { 
+    x1 = Xstep_min; 
+  }
+  if (y1 >= Ystep_max) { 
+    y1 = Ystep_max; 
+  }
+  if (y1 <= Ystep_min) { 
+    y1 = Ystep_min; 
+  }
+
+  if (verbose)
+  {
+    Serial.print("Xpos, Ypos: ");
+    Serial.print(Xpos);
+    Serial.print(",");
+    Serial.print(Ypos);
+    Serial.println("");
+  }
+
+  if (verbose)
+  {
+    Serial.print("x1, y1: ");
+    Serial.print(x1);
+    Serial.print(",");
+    Serial.print(y1);
+    Serial.println("");
+  }
+
+  //  Convert coordinates to steps
+  x1 = (int)(x1*StepsPerMillimeterX);
+  y1 = (int)(y1*StepsPerMillimeterY);
+  float x0 = Xpos;
+  float y0 = Ypos;
+
+  //  Let's find out the change for the coordinates
+  long dx = abs(x1-x0);
+  long dy = abs(y1-y0);
+  int sx = x0<x1 ? StepInc : -StepInc;
+  int sy = y0<y1 ? StepInc : -StepInc;
+
+  long i;
+  long over = 0;
+
+  if (dx > dy) {
+    for (i=0; i<dx; ++i) {
+      stepperX.step(sx);
+      //delayMicroseconds(step_delay);
+      over+=dy;
+      if (over>=dx) {
+        over-=dx;
+        stepperY.step(sy);
+      //delayMicroseconds(step_delay);
+      }
+      delayMicroseconds(StepDelay);
+    }
+  }
+  else {
+    for (i=0; i<dy; ++i) {
+      myStepperY.step(sy);
+      over+=dx;
+      if (over>=dy) {
+        over-=dy;
+        myStepperX.step(sx);
+      }
+      delayMicroseconds(StepDelay);
+    }    
+  }
+
+  if (verbose)
+  {
+    Serial.print("dx, dy:");
+    Serial.print(dx);
+    Serial.print(",");
+    Serial.print(dy);
+    Serial.println("");
+  }
+
+  if (verbose)
+  {
+    Serial.print("Going to (");
+    Serial.print(x0);
+    Serial.print(",");
+    Serial.print(y0);
+    Serial.println(")");
+  }
+
+  //  Delay before any next lines are submitted
+  delay(LineDelay);
+  //  Update the positions
+  Xpos = x1;
+  Ypos = y1;
+}
+
+void processIncomingLine( char* line, int charNB ) {
+  int currentIndex = 0;
+  char buffer[ 64 ];                                 // Hope that 64 is enough for 1 parameter
+  struct point newPos;
+
+  newPos.x = 0.0;
+  newPos.y = 0.0;
+
+  //  Needs to interpret 
+  //  G1 for moving
+  //  G4 P300 (wait 150ms)
+  //  G1 X60 Y30
+  //  G1 X30 Y50
+  //  M300 S30 (pen down)
+  //  M300 S50 (pen up)
+  //  Discard anything with a (
+  //  Discard any other command!
+
+  while( currentIndex < charNB ) {
+    switch ( line[ currentIndex++ ] ) {              // Select command, if any
+    case 'U':
+      penUp(); 
+      break;
+    case 'D':
+      penDown(); 
+      break;
+    case 'G':
+      buffer[0] = line[ currentIndex++ ];          // /!\ Dirty - Only works with 2 digit commands
+      //      buffer[1] = line[ currentIndex++ ];
+      //      buffer[2] = '\0';
+      buffer[1] = '\0';
+
+      switch ( atoi( buffer ) ){                   // Select G command
+      case 0:                                   // G00 & G01 - Movement or fast movement. Same here
+      case 1:
+        // /!\ Dirty - Suppose that X is before Y
+        char* indexX = strchr( line+currentIndex, 'X' );  // Get X/Y position in the string (if any)
+        char* indexY = strchr( line+currentIndex, 'Y' );
+        if ( indexY <= 0 ) {
+          newPos.x = atof( indexX + 1); 
+          newPos.y = actuatorPos.y;
+        } 
+        else if ( indexX <= 0 ) {
+          newPos.y = atof( indexY + 1);
+          newPos.x = actuatorPos.x;
+        } 
+        else {
+          newPos.y = atof( indexY + 1);
+          indexY = '\0';
+          newPos.x = atof( indexX + 1);
+        }
+        drawLine(newPos.x, newPos.y );
+        //        Serial.println("ok");
+        actuatorPos.x = newPos.x;
+        actuatorPos.y = newPos.y;
+        break;
+      }
+      break;
+    case 'M':
+      buffer[0] = line[ currentIndex++ ];        // /!\ Dirty - Only works with 3 digit commands
+      buffer[1] = line[ currentIndex++ ];
+      buffer[2] = line[ currentIndex++ ];
+      buffer[3] = '\0';
+      switch ( atoi( buffer ) ){
+      case 300:
+        {
+          char* indexS = strchr( line+currentIndex, 'S' );
+          float Spos = atof( indexS + 1);
+          //          Serial.println("ok");
+          if (Spos == 30) { 
+            penDown(); 
+          }
+          if (Spos == 50) { 
+            penUp(); 
+          }
+          break;
+        }
+      case 114:                                // M114 - Repport position
+        Serial.print( "Absolute position : X = " );
+        Serial.print( actuatorPos.x );
+        Serial.print( "  -  Y = " );
+        Serial.println( actuatorPos.y );
+        break;
+      default:
+        Serial.print( "Command not recognized : M");
+        Serial.println( buffer );
+      }
+    }
+  }
+
 
 
 }
 
 
 void setup() {
-  Serial.begin(115200);
+  Serial.begin(9600);
   pen_control.attach(servo_pin);
   pinMode(Xstep_pin, OUTPUT);  digitalWrite(Xstep_pin, LOW);
   pinMode(Xdir_pin, OUTPUT);
@@ -250,22 +471,82 @@ void setup() {
   pinMode(Ysense_pin, INPUT);
   Serial.println("     ######### WELCOME TO CNC JOTTER ########");
   Serial.println(); delay(500);
+  pen_control.write(penZUp);
+  delay(200);
   step_sync();
-  step_goto(250000, 250000);
-  pen_up_down(down);
-  pen_up_down(up);
-  pen_up_down(down);
+  step_goto(Xstep_reset_val, Ystep_reset_val);
+  step_goto(Xstep_start_val, Ystep_start_val);
+
+
+ 
   //draw();
 
   Serial.println(Xstep_count);
   Serial.println(Ystep_count);
 
-
 }
 
 void loop() {
 
+  char line[ LINE_BUFFER_LENGTH ];
+  char c;
+  int lineIndex;
+  bool lineIsComment, lineSemiColon;
 
+  lineIndex = 0;
+  lineSemiColon = false;
+  lineIsComment = false;
+
+  while ( Serial.available()>0 ) {
+      c = Serial.read();
+      if (( c == '\n') || (c == '\r') ) {             
+        if ( lineIndex > 0 ) {                        
+          line[ lineIndex ] = '\0';                   
+          if (verbose) { 
+            Serial.print( "Received : "); 
+            Serial.println( line ); 
+          }
+          processIncomingLine( line, lineIndex );
+          lineIndex = 0;
+        } 
+        else { 
+         
+        }
+        lineIsComment = false;
+        lineSemiColon = false;
+        Serial.println("ok");    
+      } 
+      else {
+        if ( (lineIsComment) || (lineSemiColon) ) {   // Throw away all comment characters
+          if ( c == ')' )  lineIsComment = false;     // End of comment. Resume line.
+        } 
+        else {
+          if ( c <= ' ' ) {                           // Throw away whitepace and control characters
+          } 
+          else if ( c == '/' ) {                    // Block delete not supported. Ignore character.
+          } 
+          else if ( c == '(' ) {                    // Enable comments flag and ignore all characters until ')' or EOL.
+            lineIsComment = true;
+          } 
+          else if ( c == ';' ) {
+            lineSemiColon = true;
+          } 
+          else if ( lineIndex >= LINE_BUFFER_LENGTH-1 ) {
+            Serial.println( "ERROR - lineBuffer overflow" );
+            lineIsComment = false;
+            lineSemiColon = false;
+          } 
+          else if ( c >= 'a' && c <= 'z' ) {        // Upcase lowercase
+            line[ lineIndex++ ] = c-'a'+'A';
+          } 
+          else {
+            line[ lineIndex++ ] = c;
+          }
+        }
+      }
+    }
+  }
+  
   //    step_sync();
   //    step_goto(Xstep_reset_val, Ystep_reset_val);
   //    draw();
