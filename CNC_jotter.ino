@@ -30,11 +30,13 @@ Servo pen_control;
 #define Xstep_min 0
 #define Ystep_max 32000
 #define Ystep_min 0
+#define Zstep_min 0
+#define Zstep_max 1
 
 #define  Zmax 1
 #define Zmin 0
-float Xpos = Xstep_min
-float Ypos = Ystep_min
+float Xpos = Xstep_min;
+float Ypos = Ystep_min;
 float Zpos = Zstep_min;
 
 #define Xstep_sync_val 0
@@ -44,8 +46,9 @@ float Zpos = Zstep_min;
 #define Xstep_start_val 17000  //change to paper boundaries
 #define Ystep_start_val 17000 //cahnge to paper boundaries
 
-float stepsPerMillimeterX = 7;
-float stepsPerMillimeterY = 7;
+float StepInc = 1;
+float StepsPerMillimeterX = 7;
+float StepsPerMillimeterY = 7;
 
 int Xstep_count = 0;
 int Ystep_count = 0;
@@ -317,26 +320,26 @@ void drawLine(float x1, float y1) {
 
   if (dx > dy) {
     for (i=0; i<dx; ++i) {
-      stepperX.step(sx);
+      Xstepper.step(sx);
       //delayMicroseconds(step_delay);
       over+=dy;
       if (over>=dx) {
         over-=dx;
-        stepperY.step(sy);
+        Ystepper.step(sy);
       //delayMicroseconds(step_delay);
       }
-      delayMicroseconds(StepDelay);
+      delayMicroseconds(step_delay);
     }
   }
   else {
     for (i=0; i<dy; ++i) {
-      myStepperY.step(sy);
+      Ystepper.step(sy);
       over+=dx;
       if (over>=dy) {
         over-=dy;
-        myStepperX.step(sx);
+        Xstepper.step(sx);
       }
-      delayMicroseconds(StepDelay);
+      delayMicroseconds(step_delay);
     }    
   }
 
@@ -553,5 +556,3 @@ void loop() {
   //
   //    Serial.println(Xstep_count);
   //    Serial.println(Ystep_count);
-
-}
